@@ -4,7 +4,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import os
 
 # Replace with your actual bot token
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = osghjhg.getenv("BOT_TOKEN")
 
 
 
