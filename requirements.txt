@@ -1,2 +1,2 @@
-python-telegram-bot
 yt-dlp
+python-telegram-bot==20.3
