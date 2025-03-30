@@ -4,7 +4,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import logging
 import os
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_CHAT_ID = int(os.getenv('ADMIN_CHAT_ID'))
+ADMIN_CHAT_ID = os.getenv('ADMIN_CHAT_ID')
 
 
 # Set up logging
