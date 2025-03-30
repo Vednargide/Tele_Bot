@@ -1,117 +1,159 @@
 import yt_dlp
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import logging
 import os
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+ADMIN_CHAT_ID = int(os.getenv('ADMIN_CHAT_ID'))
 
-# Replace with your actual bot token
-BOT_TOKEN = osghjhg.getenv("BOT_TOKEN")
 
+# Set up logging
+logging.basicConfig(filename="bot_usage.log", level=logging.INFO, format="%(asctime)s - %(message)s")
 
+async def log_activity(user, song_name):
+    """Log user activity to a file."""
+    logging.info(f"User: {user.full_name} (ID: {user.id}, Username: {user.username}), Requested: {song_name}")
+
+async def notify_admin(context, user, song_name):
+    """Notify admin about the user's activity."""
+    message = (
+        f"New Song Request:\n"
+        f"User: {user.first_name} {user.last_name or ''} (ID: {user.id}, Username: @{user.username or 'N/A'})\n"
+        f"Requested: {song_name}"
+    )
+    await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=message)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the /start command."""
     await update.message.reply_text(
-        "Hi! Send me the name of a song (add 'BGM' if you only want the background music)."
+        "Hi! Send me the name of a song, and I'll fetch it for you!\n\n"
+        "Add 'bgm' to get only the background music (e.g., 'song_name bgm')."
     )
 
+async def download_song(song_name: str) -> str:
+    """Downloads a regular song and returns the file path."""
+    search_query = song_name
+    output_file = f"{song_name}.%(ext)s"
 
-async def download_song_without_ffmpeg(song_name: str, bgm: bool = False) -> str:
-    """Downloads the song or BGM version and returns the file path."""
-    output_file = f"{song_name}{'_bgm' if bgm else ''}.mp4"  # Direct download to .mp4
     ydl_opts = {
-        'format': 'bestaudio',  # Download the best audio-only format
-        'outtmpl': output_file,  # Output filename template
-        'noplaylist': True,  # Ensure only a single result is downloaded
+        'format': 'bestaudio/best',
+        'outtmpl': output_file,
+        'noplaylist': True,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
-            # Download the audio
-            info = ydl.extract_info(f"ytsearch:{song_name}", download=True)
-            print(f"DEBUG: File downloaded as {output_file}")
-            return output_file
+            info = ydl.extract_info(f"ytsearch:{search_query}", download=True)
+            file_path = ydl.prepare_filename(info)
+
+            if os.path.exists(file_path):
+                return file_path
+
+            base_path = file_path.rsplit('.', 1)[0]
+            for ext in ['.mp4']:
+                test_path = base_path + ext
+                if os.path.exists(test_path):
+                    return test_path
 
         except Exception as e:
             raise FileNotFoundError(f"An error occurred during download: {e}")
 
+async def download_bgm(song_name: str) -> str:
+    """Downloads the BGM version of a song and returns the file path."""
+    search_query = f"{song_name} background music"
+    output_file = f"{song_name}_bgm.%(ext)s"
+
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': output_file,
+        'noplaylist': True,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        try:
+            info = ydl.extract_info(f"ytsearch:{search_query}", download=True)
+            file_path = ydl.prepare_filename(info)
+
+            if os.path.exists(file_path):
+                return file_path
+
+            base_path = file_path.rsplit('.', 1)[0]
+            for ext in ['.mp4']:
+                test_path = base_path + ext
+                if os.path.exists(test_path):
+                    return test_path
+
+        except Exception as e:
+            raise FileNotFoundError(f"An error occurred during download: {e}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles song requests and replies with user details."""
-    song_name = update.message.text  # The song name provided by the user
-    chat_id = update.effective_chat.id  # Chat ID to send the file
-    user = update.message.from_user  # Get user info
+    song_name = update.message.text
+    user = update.message.from_user
+    chat_id = update.effective_chat.id
 
-    # Determine if the user specifically requested a BGM version
-    is_bgm_only = "bgm" in song_name.lower()
-
-    # If BGM is specifically requested, clean the song name
-    clean_song_name = song_name.replace("BGM", "").replace("bgm", "").strip()
+    # Log and notify admin
+    await log_activity(user, song_name)
+    await notify_admin(context, user, song_name)
 
     try:
-        # Inform the user that the bot is searching for the song/BGM
-        if is_bgm_only:
-            await update.message.reply_text(f"Searching for the BGM of '{clean_song_name}'...")
-        else:
-            await update.message.reply_text(f"Searching for '{clean_song_name}' and its BGM...")
+        if "bgm" in song_name.lower():
+            song_name = song_name.lower().replace("bgm", "").strip()
+            await update.message.reply_text(f"Searching for BGM of '{song_name}'...")
+            file_path = await download_bgm(song_name)
+            print(f"DEBUG: Sending BGM file from {file_path} to user {chat_id} ({user.full_name})")
 
-        # Handle BGM only
-        if is_bgm_only:
-            bgm_file = await download_song_without_ffmpeg(clean_song_name, bgm=True)
-            print(f"DEBUG: Sending BGM file: {bgm_file}")
-
-            with open(bgm_file, 'rb') as bgm_audio_file:
-                await context.bot.send_audio(
-                    chat_id=chat_id,
-                    audio=bgm_audio_file,
-                    caption=f"Here is the BGM for: {clean_song_name}"
-                )
-
-            os.remove(bgm_file)
-            print(f"DEBUG: Deleted BGM file: {bgm_file}")
-
-        # Handle both song and BGM
-        else:
-            song_file = await download_song_without_ffmpeg(clean_song_name)
-            bgm_file = await download_song_without_ffmpeg(clean_song_name, bgm=True)
-
-            print(f"DEBUG: Sending files to user {chat_id}: {song_file}, {bgm_file}")
-
-            with open(song_file, 'rb') as audio_file:
+            with open(file_path, 'rb') as audio_file:
                 await context.bot.send_audio(
                     chat_id=chat_id,
                     audio=audio_file,
-                    caption=f"Here is the song: {clean_song_name}"
+                    caption=f"Here is your BGM: {song_name}"
                 )
 
-            with open(bgm_file, 'rb') as bgm_audio_file:
+            os.remove(file_path)
+            print(f"DEBUG: Deleted BGM file {file_path}")
+        else:
+            await update.message.reply_text(f"Searching for both song and BGM of '{song_name}'...")
+
+            # Download the regular song
+            song_file_path = await download_song(song_name)
+            print(f"DEBUG: Sending song file from {song_file_path} to user {chat_id} ({user.full_name})")
+
+            with open(song_file_path, 'rb') as audio_file:
                 await context.bot.send_audio(
                     chat_id=chat_id,
-                    audio=bgm_audio_file,
-                    caption=f"Here is the BGM for: {clean_song_name}"
+                    audio=audio_file,
+                    caption=f"Here is your song: {song_name}"
                 )
 
-            os.remove(song_file)
-            os.remove(bgm_file)
-            print(f"DEBUG: Deleted files: {song_file} and {bgm_file}")
+            os.remove(song_file_path)
+            print(f"DEBUG: Deleted song file {song_file_path}")
 
-    except FileNotFoundError as error:
-        await update.message.reply_text(
-            f"Sorry, I couldn't find the song or its BGM for '{clean_song_name}'. Please try again."
-        )
-        print(f"ERROR: {error}")
+            # Download the BGM version
+            bgm_file_path = await download_bgm(song_name)
+            print(f"DEBUG: Sending BGM file from {bgm_file_path} to user {chat_id} ({user.full_name})")
 
+            with open(bgm_file_path, 'rb') as audio_file:
+                await context.bot.send_audio(
+                    chat_id=chat_id,
+                    audio=audio_file,
+                    caption=f"Here is your BGM: {song_name}"
+                )
+
+            os.remove(bgm_file_path)
+            print(f"DEBUG: Deleted BGM file {bgm_file_path}")
+
+    except FileNotFoundError as e:
+        await update.message.reply_text(f"Error: {e}")
 
 def main():
     """Main function to start the bot."""
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Add command and message handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Start the bot
     application.run_polling()
-
 
 if __name__ == '__main__':
     main()
