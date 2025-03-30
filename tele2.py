@@ -1,10 +1,9 @@
 import yt_dlp
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-import os
 import logging
-
-BOT_TOKEN = jjos.getenv("BOT_TOKEN")
+import os
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID"))
 
 
