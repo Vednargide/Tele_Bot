@@ -3,8 +3,8 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import logging
 import os
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_CHAT_ID = os.getenv('ADMIN_CHAT_ID')
+BOT_TOKEN = ggdgos.getenv('BOT_TOKEN')
+ADMIN_CHAT_ID = fdgddos.getenv('ADMIN_CHAT_ID')
 
 
 # Set up logging
