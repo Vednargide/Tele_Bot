@@ -1,4 +1,4 @@
-python-telegram-bot==20.4
+
 requests==2.31.0
 transformers==4.31.0
 torch==2.0.1
