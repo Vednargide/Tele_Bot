@@ -1,2 +1,4 @@
-yt-dlp
-python-telegram-bot==20.3
+python-telegram-bot==20.4
+requests==2.31.0
+beautifulsoup4==4.12.2
+python-dotenv==1.0.0
