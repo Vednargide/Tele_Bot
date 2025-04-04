@@ -55,13 +55,23 @@ class AIBot:
     def __init__(self):
         self.aptitude = AptitudeHandler()
         self.math = MathHandler()
+        self.allowed_group_ids = [-1001369278049]  # Replace with your group ID
         self.gemini_config = {
             'temperature': 0.7,
             'top_p': 0.9,
             'top_k': 40,
             'max_output_tokens': 2048,
         }
+    
 
+    
+    async def should_respond(self, chat_id, message_text):
+        # Skip empty messages or messages starting with '/'
+        if not message_text or message_text.startswith('/'):
+            return False
+            
+        # Check if message is from allowed group
+        return chat_id in self.allowed_group_ids
     async def get_response(self, query):
         try:
             # Check for simple math
@@ -136,8 +146,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        response = await bot.get_response(update.message.text)
+        # Get chat ID and message text
+        chat_id = update.effective_chat.id
+        message_text = update.message.text
+
+        # Check if bot should respond
+        if not await bot.should_respond(chat_id, message_text):
+            return
+
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        response = await bot.get_response(message_text)
         
         if len(response) <= 4096:
             await update.message.reply_text(response)
@@ -153,9 +171,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     
+    # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
+        handle_message
+    ))
     
     application.run_polling()
 
