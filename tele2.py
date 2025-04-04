@@ -4,11 +4,10 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import requests
 import json
-import wolframalpha
-from transformers import pipeline
-from dotenv import load_dotenv
+from bs4 import BeautifulSoup
 import re
 import math
+from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
@@ -21,116 +20,61 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 class EnhancedAIBot:
     def __init__(self):
-        # Initialize free models and tools
-        self.qa_pipeline = pipeline('question-answering', model='deepset/roberta-base-squad2')
         self.math_pattern = re.compile(r'[\d\+\-\*\/\(\)\s]+$')
     
     def evaluate_mathematical_expression(self, expression):
         """Safely evaluate mathematical expressions"""
         try:
-            # Remove any whitespace and validate expression
             clean_expr = expression.replace(' ', '')
             if not self.math_pattern.match(clean_expr):
                 return None
-            
             return eval(clean_expr, {"__builtins__": {}}, {"math": math})
         except:
             return None
 
-    async def get_wikipedia_context(self, query):
-        """Get relevant context from Wikipedia"""
+    async def get_answer(self, query):
+        """Get answer from various sources"""
         try:
-            url = f"https://en.wikipedia.org/w/api.php"
-            params = {
-                "action": "query",
-                "format": "json",
-                "list": "search",
-                "srsearch": query,
-                "utf8": 1
-            }
-            response = requests.get(url, params=params)
-            data = response.json()
-            
-            if "query" in data and "search" in data["query"]:
-                return data["query"]["search"][0]["snippet"]
-            return ""
-        except:
-            return ""
-
-    async def process_question(self, question):
-        """Process questions with enhanced accuracy"""
-        try:
-            # Check if it's a mathematical question
-            if self.math_pattern.match(question):
-                result = self.evaluate_mathematical_expression(question)
+            # Check if it's a math question
+            if self.math_pattern.match(query):
+                result = self.evaluate_mathematical_expression(query)
                 if result is not None:
                     return f"The answer is: {result}"
 
-            # Get context from Wikipedia
-            context = await self.get_wikipedia_context(question)
-            
-            # Use QA model for natural language questions
-            if context:
-                answer = self.qa_pipeline(question=question, context=context)
-                confidence = answer['score']
+            # Use DuckDuckGo API for general knowledge
+            encoded_query = requests.utils.quote(query)
+            url = f"https://api.duckduckgo.com/?q={encoded_query}&format=json"
+            response = requests.get(url)
+            data = response.json()
+
+            if data.get("Abstract"):
+                return data["Abstract"]
+            elif data.get("Answer"):
+                return data["Answer"]
+
+            # Fallback to dictionary API for definitions
+            if query.lower().startswith("what is"):
+                term = query.lower().replace("what is", "").replace("?", "").strip()
+                dict_url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{term}"
+                dict_response = requests.get(dict_url)
                 
-                if confidence > 0.8:
-                    return f"Answer: {answer['answer']}\n(Confidence: {confidence:.2%})"
+                if dict_response.status_code == 200:
+                    dict_data = dict_response.json()
+                    if dict_data and len(dict_data) > 0:
+                        meaning = dict_data[0].get('meanings', [{}])[0]
+                        definition = meaning.get('definitions', [{}])[0].get('definition', '')
+                        if definition:
+                            return f"Definition: {definition}"
 
-            # Fallback to rule-based responses for common questions
-            if "what is" in question.lower():
-                # Process definitional questions
-                definition = await self.get_definition(question)
-                if definition:
-                    return definition
-
-            # Generate response using combination of available tools
-            response = await self.generate_combined_response(question)
-            return response
+            return "I apologize, but I need more context to provide an accurate answer to this question."
 
         except Exception as e:
             logger.error(f"Error processing question: {e}")
-            return "I apologize, but I encountered an error processing your question. Please try rephrasing it."
-
-    async def get_definition(self, question):
-        """Get definitions for 'what is' questions"""
-        try:
-            term = question.lower().replace("what is", "").replace("?", "").strip()
-            url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{term}"
-            response = requests.get(url)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data and len(data) > 0:
-                    meanings = data[0].get('meanings', [])
-                    if meanings:
-                        definition = meanings[0].get('definitions', [{}])[0].get('definition', '')
-                        if definition:
-                            return f"Definition: {definition}"
-            return None
-        except:
-            return None
-
-    async def generate_combined_response(self, question):
-        """Generate response using multiple sources"""
-        responses = []
-        
-        # Get Wikipedia context
-        wiki_context = await self.get_wikipedia_context(question)
-        if wiki_context:
-            responses.append(wiki_context)
-
-        # Use QA pipeline
-        if responses:
-            answer = self.qa_pipeline(question=question, context=" ".join(responses))
-            if answer['score'] > 0.7:
-                return f"Based on available information: {answer['answer']}"
-
-        return "I apologize, but I don't have enough information to provide an accurate answer to this question."
+            return "I encountered an error processing your question. Please try rephrasing it."
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_message = (
-        "👋 Welcome! I'm an enhanced AI assistant designed to provide accurate answers "
+        "👋 Welcome! I'm an AI assistant designed to provide accurate answers "
         "to your questions. I can handle:\n\n"
         "• Mathematical calculations\n"
         "• General knowledge questions\n"
@@ -160,8 +104,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Send typing indicator
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     
-    # Process the question
-    response = await ai_bot.process_question(question)
+    # Get answer
+    response = await ai_bot.get_answer(question)
     
     # Send response
     await update.message.reply_text(response, parse_mode="Markdown")
