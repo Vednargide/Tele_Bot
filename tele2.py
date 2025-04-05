@@ -171,6 +171,14 @@ class AIBot:
         except Exception as e:
             logger.error(f"Gemini API error: {str(e)}")
             return "I encountered an error processing your request."
+    def clean_response(self, text):
+            if not text:
+                return "❌ I couldn't generate a response."
+        
+            text = text.replace('_', '\\_').replace('*', '\\*').replace('`', '\\`')
+            text = re.sub(r'\n{3,}', '\n\n', text)
+        
+            return "💡 " + text.strip()
 
     async def get_response(self, query):
         try:
@@ -203,14 +211,7 @@ class AIBot:
         except Exception as e:
             logger.error(f"Error in clean_response: {str(e)}")
             return "❌ Error formatting response"
-        def clean_response(self, text):
-            if not text:
-                return "❌ I couldn't generate a response."
         
-            text = text.replace('_', '\\_').replace('*', '\\*').replace('`', '\\`')
-            text = re.sub(r'\n{3,}', '\n\n', text)
-        
-            return "💡 " + text.strip()
 
 bot = AIBot()
 
