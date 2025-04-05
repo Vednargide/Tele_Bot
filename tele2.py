@@ -1,37 +1,37 @@
 import os
- import logging
- import re
- import math
- import asyncio
- import google.generativeai as genai
- from huggingface_hub import InferenceClient
- from telegram import Update
- from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
- from dotenv import load_dotenv
+import logging
+import re
+import math
+import asyncio
+import google.generativeai as genai
+from huggingface_hub import InferenceClient
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from dotenv import load_dotenv
  
- load_dotenv()
- logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
- logger = logging.getLogger(__name__)
+load_dotenv()
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
  
- TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
- GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
- HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
  
- genai.configure(api_key=GEMINI_API_KEY)
- gemini_model = genai.GenerativeModel('gemini-1.5-pro-latest')
- hf_client = InferenceClient(token=HUGGINGFACE_API_KEY)
+genai.configure(api_key=GEMINI_API_KEY)
+gemini_model = genai.GenerativeModel('gemini-1.5-pro-latest')
+hf_client = InferenceClient(token=HUGGINGFACE_API_KEY)
  
- class MathHandler:
+class MathHandler:
      def solve(self, expression):
-         try:
+        try:
              # Remove any unsafe operations
              safe_expr = re.sub(r'[^0-9+\-*/().\s]', '', expression)
              return eval(safe_expr, {"__builtins__": {}}, {})
          except:
              return None
  
- class AptitudeHandler:
-     def __init__(self):
+class AptitudeHandler:
+    def __init__(self):
          self.math_handler = MathHandler()
          self.patterns = {
              'percentage': r'(\d+(\.\d+)?%|\bpercent\b)',
@@ -42,16 +42,16 @@ import os
              'sequence': r'\b(sequence|series|next number)\b'
          }
  
-     def detect_type(self, question):
+    def detect_type(self, question):
          for qtype, pattern in self.patterns.items():
              if re.search(pattern, question.lower()):
                  return qtype
          return None
  
-     def format_solution(self, steps, answer):
+    def format_solution(self, steps, answer):
          return f"Step-by-step Solution:\n{steps}\n\nFinal Answer: {answer}"
  
- class AIBot:
+class AIBot:
      def __init__(self):
          self.aptitude = AptitudeHandler()
          self.math = MathHandler()
