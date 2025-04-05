@@ -159,45 +159,58 @@ class AIBot:
             return False
         return chat_id in self.allowed_group_ids
 
+    async def get_gemini_response(self, prompt):
+        try:
+            response = gemini_model.generate_content(prompt)
+            if response and hasattr(response, 'text'):
+                return response.text
+            elif response and hasattr(response, 'parts'):
+                return ' '.join(part.text for part in response.parts)
+            else:
+                return "I couldn't process this request properly."
+        except Exception as e:
+            logger.error(f"Gemini API error: {str(e)}")
+            return "I encountered an error processing your request."
+
     async def get_response(self, query):
         try:
+        # Check for simple math
             if re.match(r'^[\d+\-*/().\s]+$', query):
                 result = self.math.solve(query)
                 if result is not None:
                     return f"🔢 Result: {result}"
 
-            if re.search(r'pattern|transformation|rearrange', query.lower()) and ':' in query:
-                return self.pattern_recognition.analyze_pattern(query)
-
-            apt_type = self.aptitude.detect_type(query)
-            if apt_type:
-                prompt = f"Solve this {apt_type} problem with detailed steps: {query}"
-            else:
-                prompt = query
-
-            response = await self.get_gemini_response(prompt)
+        # Get Gemini response with error handling
+            response = await self.get_gemini_response(query)
+            if not response:
+                return "❌ I couldn't generate a response. Please try again."
+            
             return self.clean_response(response)
 
         except Exception as e:
-            logger.error(f"Error in get_response: {e}")
-            return "❌ I encountered an error. Please try again."
+            logger.error(f"Error in get_response: {str(e)}")
+            return "❌ I encountered an error. Please try rephrasing your question."
 
-    async def get_gemini_response(self, prompt):
+
+    
         try:
-            response = gemini_model.generate_content(prompt)
-            return response.text
+        # Remove any problematic characters
+            text = str(text).replace('_', '\\_').replace('*', '\\*').replace('`', '\\`')
+        # Remove excessive newlines
+            text = re.sub(r'\n{3,}', '\n\n', text)
+        # Add emoji prefix
+            return "💡 " + text.strip()
         except Exception as e:
-            logger.error(f"Gemini API error: {e}")
-            return None
-
-    def clean_response(self, text):
-        if not text:
-            return "❌ I couldn't generate a response."
+            logger.error(f"Error in clean_response: {str(e)}")
+            return "❌ Error formatting response"
+        def clean_response(self, text):
+            if not text:
+                return "❌ I couldn't generate a response."
         
-        text = text.replace('_', '\\_').replace('*', '\\*').replace('`', '\\`')
-        text = re.sub(r'\n{3,}', '\n\n', text)
+            text = text.replace('_', '\\_').replace('*', '\\*').replace('`', '\\`')
+            text = re.sub(r'\n{3,}', '\n\n', text)
         
-        return "💡 " + text.strip()
+            return "💡 " + text.strip()
 
 bot = AIBot()
 
