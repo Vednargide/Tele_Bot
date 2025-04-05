@@ -64,15 +64,31 @@ class AIBot:
         }
 
     def clean_response(self, text):
-        if not text:
-            return "❌ I couldn't generate a response."
-        
-        text = re.sub(r'```(\w+)?\n(.*?)\n```', self.format_code_block, text, flags=re.DOTALL)
-        text = re.sub(r'\$(.+?)\$', r'📐 \1', text)
-        text = re.sub(r'^\s*[-*]\s(.+)$', r'• \1', text, flags=re.MULTILINE)
-        text = re.sub(r'^(#+)\s(.+)$', self.format_header, text, flags=re.MULTILINE)
-        
-        return self.add_decorative_elements(text.strip())
+    if not text:
+        return "❌ I couldn't generate a response."
+    
+    # Remove LaTeX notations
+    text = re.sub(r'\\\w+{.*?}', '', text)  # Remove \command{...}
+    text = re.sub(r'\$.*?\$', '', text)     # Remove $...$ math mode
+    text = re.sub(r'\\begin{.*?}.*?\\end{.*?}', '', text, flags=re.DOTALL)  # Remove environments
+    text = re.sub(r'\\[a-zA-Z]+', '', text) # Remove other LaTeX commands
+    
+    # Clean up multiple newlines and spaces
+    text = re.sub(r'\n\s*\n', '\n\n', text)
+    text = re.sub(r' +', ' ', text)
+    
+    # Format the response with emojis and clear structure
+    sections = text.split('\n\n')
+    formatted = ""
+    
+    for i, section in enumerate(sections):
+        if section.strip():
+            if i == 0:
+                formatted += f"💡 {section.strip()}\n\n"
+            else:
+                formatted += f"📌 {section.strip()}\n\n"
+    
+    return self.add_decorative_elements(formatted.strip())
 
     def format_code_block(self, match):
         language = match.group(1) or ''
