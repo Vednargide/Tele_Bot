@@ -1,7 +1,6 @@
 import os
 import logging
 import re
-import math
 import asyncio
 import google.generativeai as genai
 from huggingface_hub import InferenceClient
@@ -9,19 +8,14 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
-
-# Configure logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configure API tokens
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 HUGGINGFACE_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
 
-# Configure Gemini
 genai.configure(api_key=GEMINI_API_KEY)
 gemini_model = genai.GenerativeModel('gemini-1.5-pro-latest')
 hf_client = InferenceClient(token=HUGGINGFACE_API_KEY)
@@ -56,73 +50,19 @@ class AIBot:
         self.aptitude = AptitudeHandler()
         self.math = MathHandler()
         self.allowed_group_ids = [-1001369278049]
+        self.response_cache = {}
         self.gemini_config = {
             'temperature': 0.7,
             'top_p': 0.9,
             'top_k': 40,
             'max_output_tokens': 2048,
         }
-
-    def clean_response(self, text):
-        if not text:
-            return "❌ I couldn't generate a response."
-    
-    # Remove LaTeX notations
-        text = re.sub(r'\\\w+{.*?}', '', text)  # Remove \command{...}
-        text = re.sub(r'\$.*?\$', '', text)     # Remove $...$ math mode
-        text = re.sub(r'\\begin{.*?}.*?\\end{.*?}', '', text, flags=re.DOTALL)  # Remove environments
-        text = re.sub(r'\\[a-zA-Z]+', '', text) # Remove other LaTeX commands
-    
-    # Clean up multiple newlines and spaces
-        text = re.sub(r'\n\s*\n', '\n\n', text)
-        text = re.sub(r' +', ' ', text)
-    
-    # Format the response with emojis and clear structure
-        sections = text.split('\n\n')
-        formatted = ""
-    
-        for i, section in enumerate(sections):
-            if section.strip():
-                if i == 0:
-                    formatted += f"💡 {section.strip()}\n\n"
-                else:
-                    formatted += f"📌 {section.strip()}\n\n"
-    
-        return self.add_decorative_elements(formatted.strip())
-
-    def format_code_block(self, match):
-        language = match.group(1) or ''
-        code = match.group(2)
-        return f"💻 Code ({language}):\n┌──────────────────\n│ {code.replace('│', '|')}\n└──────────────────"
-
-    def format_header(self, match):
-        level = len(match.group(1))
-        text = match.group(2)
-        decorators = ['🔷', '🔶', '📌', '💠', '🔸', '🔹']
-        return f"\n{decorators[min(level-1, len(decorators)-1)]} {text.upper()}\n"
-
-    def add_decorative_elements(self, text):
-        if "math" in text.lower() or any(char in text for char in "+-×÷="):
-            text = "🧮 Mathematical Solution:\n" + text
-        elif "code" in text.lower() or "programming" in text.lower():
-            text = "👨‍💻 Programming Solution:\n" + text
-        elif "aptitude" in text.lower():
-            text = "🎯 Aptitude Solution:\n" + text
-        else:
-            text = "💡 Answer:\n" + text
-
-        text = re.sub(r'(Important:|Note:|Remember:)(.*?)(?=\n\n|$)', 
-                     r'📢 \1\n━━━━━━━━━━━━━━\2\n━━━━━━━━━━━━━━', 
-                     text, flags=re.DOTALL)
-
-        text = re.sub(r'Step (\d+):', r'📍 Step \1:', text)
-
-        if "conclusion" in text.lower():
-            text = re.sub(r'(conclusion:.*?)(?=\n|$)', 
-                         r'🎯 Final \1', 
-                         text, flags=re.IGNORECASE)
-
-        return f"{'═' * 30}\n{text}\n{'═' * 30}"
+        self.domain_patterns = {
+            'programming': r'code|program|function|algorithm',
+            'mathematics': r'math|calculate|solve|equation',
+            'science': r'physics|chemistry|biology',
+            'general': r'explain|what|how|why'
+        }
 
     async def should_respond(self, chat_id, message_text):
         if not message_text or message_text.startswith('/'):
@@ -137,86 +77,97 @@ class AIBot:
             logger.error(f"Gemini API error: {e}")
             return None
 
+    def detect_domain(self, query):
+        for domain, pattern in self.domain_patterns.items():
+            if re.search(pattern, query.lower()):
+                return domain
+        return 'general'
+
+    def format_response(self, text, domain):
+        if not text:
+            return "❌ I couldn't generate a response."
+
+        formatted = "═══════════════════════════\n"
+        
+        if domain == 'programming':
+            formatted += "👨‍💻 Programming Solution:\n\n"
+        elif domain == 'mathematics':
+            formatted += "🧮 Mathematical Solution:\n\n"
+        elif domain == 'science':
+            formatted += "🔬 Scientific Explanation:\n\n"
+        else:
+            formatted += "💡 Answer:\n\n"
+
+        sections = text.split('\n')
+        for section in sections:
+            if section.strip():
+                if 'step' in section.lower():
+                    formatted += f"📍 {section}\n"
+                elif ':' in section:
+                    formatted += f"• {section}\n"
+                else:
+                    formatted += f"{section}\n"
+
+        formatted += "\n═══════════════════════════"
+        return formatted
+
     async def get_response(self, query):
         try:
+            if query in self.response_cache:
+                return self.response_cache[query]
+
             if re.match(r'^[\d+\-*/().\s]+$', query):
                 result = self.math.solve(query)
                 if result is not None:
-                    return self.format_math_response(f"Result: {result}")
+                    return f"🧮 Result: {result}"
 
+            domain = self.detect_domain(query)
             apt_type = self.aptitude.detect_type(query)
+
             if apt_type:
-                prompt = f"Solve this {apt_type} problem with detailed steps: {query}"
+                prompt = f"Solve this {apt_type} problem step by step: {query}"
             else:
-                prompt = query
+                prompt = f"Provide a detailed answer for: {query}"
 
             response = await self.get_gemini_response(prompt)
+            formatted_response = self.format_response(response, domain)
             
-            if apt_type:
-                return self.format_aptitude_response(response)
-            return self.format_general_response(response)
+            self.response_cache[query] = formatted_response
+            return formatted_response
 
         except Exception as e:
             logger.error(f"Error in get_response: {e}")
-            return "❌ I encountered an error. Please try rephrasing your question."
-
-    def format_math_response(self, response):
-        return f"""
-🧮 Mathematical Calculation
-━━━━━━━━━━━━━━━━━━━━
-📊 Expression: {response.split('Result:')[0]}
-📝 Result: {response.split('Result:')[1]}
-━━━━━━━━━━━━━━━━━━━━"""
-
-    def format_aptitude_response(self, response):
-        formatted = "🎯 Aptitude Problem Solution\n"
-        formatted += "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        steps = response.split('\n')
-        for i, step in enumerate(steps, 1):
-            if step.strip():
-                formatted += f"📍 Step {i}: {step}\n"
-        
-        formatted += "\n✨ Final Answer: " + steps[-1]
-        return formatted
-
-    def format_general_response(self, response):
-        sections = response.split('\n\n')
-        formatted = ""
-        
-        for i, section in enumerate(sections):
-            if i == 0:
-                formatted += f"💡 {section}\n\n"
-            else:
-                formatted += f"📌 {section}\n\n"
-        
-        return formatted
+            return "❌ I encountered an error. Please try again."
 
 bot = AIBot()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_text = (
-        "👋 Welcome! I can help you with:\n\n"
-        "📊 Mathematics\n"
-        "🧮 Aptitude Problems\n"
-        "📝 General Questions\n"
-        "💡 Technical Queries\n\n"
-        "Just ask me anything!"
-    )
+    welcome_text = """
+🌟 Welcome! I can help you with:
+
+📊 Mathematics
+🧮 Aptitude Problems
+📝 General Questions
+💡 Technical Queries
+
+Just ask me anything!
+"""
     await update.message.reply_text(welcome_text)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = (
-        "I can help with:\n\n"
-        "• Math calculations\n"
-        "• Percentage problems\n"
-        "• Profit/Loss calculations\n"
-        "• Time and Distance\n"
-        "• Sequences and Series\n"
-        "• General knowledge\n"
-        "• Programming questions\n\n"
-        "Just type your question!"
-    )
+    help_text = """
+I can help with:
+
+• Math calculations
+• Percentage problems
+• Profit/Loss calculations
+• Time and Distance
+• Sequences and Series
+• General knowledge
+• Programming questions
+
+Just type your question!
+"""
     await update.message.reply_text(help_text)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -239,7 +190,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
     except Exception as e:
         logger.error(f"Error in handle_message: {e}")
-        await update.message.reply_text("Sorry, I encountered an error. Please try again.")
+        await update.message.reply_text("❌ Sorry, I encountered an error. Please try again.")
 
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -251,6 +202,7 @@ def main():
         handle_message
     ))
     
+    print("🤖 Bot is running...")
     application.run_polling()
 
 if __name__ == '__main__':
