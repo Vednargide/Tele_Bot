@@ -54,26 +54,26 @@ class AptitudeHandler:
 class AIBot:
     
      def __init__(self):
-         self.gemini_config = genai.GenerationConfig(
-             temperature=0.7,
-             top_p=0.9,
-             top_k=40,
-             max_output_tokens=2048,
-         )
-         
-         self.hf_models = {
-             'general': "meta-llama/Llama-2-70b-chat-hf",
-             'code': "bigcode/starcoder2-15b",
-             'math': "google/flan-t5-xxl"
          self.aptitude = AptitudeHandler()
          self.math = MathHandler()
+         self.allowed_group_ids = [-1001369278049]  # Replace with your group ID
          self.gemini_config = {
              'temperature': 0.7,
              'top_p': 0.9,
              'top_k': 40,
              'max_output_tokens': 2048,
          }
- 
+         
+
+        
+     async def should_respond(self, chat_id, message_text):
+         # Skip empty messages or messages starting with '/'
+         if not message_text or message_text.startswith('/'):
+             return False
+             
+         # Check if message is from allowed group
+         return chat_id in self.allowed_group_ids
+
      async def get_response(self, query):
          try:
              # Get responses from both models
