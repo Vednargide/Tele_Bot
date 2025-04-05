@@ -107,15 +107,110 @@ class AIBot:
 
     def clean_response(self, text):
         if not text:
-            return "I couldn't generate a response."
+            return "❌ I couldn't generate a response."
         
-        # Clean markdown characters
-        text = text.replace('_', '\\_').replace('*', '\\*').replace('`', '\\`')
+        # Format code blocks
+        text = re.sub(r'```(\w+)?\n(.*?)\n```', self.format_code_block, text, flags=re.DOTALL)
         
-        # Remove multiple newlines
-        text = re.sub(r'\n{3,}', '\n\n', text)
+        # Format mathematical expressions
+        text = re.sub(r'\$(.+?)\$', r'📐 \1', text)
         
-        return text.strip()
+        # Format lists
+        text = re.sub(r'^\s*[-*]\s(.+)$', r'• \1', text, flags=re.MULTILINE)
+        
+        # Format section headers
+        text = re.sub(r'^(#+)\s(.+)$', self.format_header, text, flags=re.MULTILINE)
+        
+        return self.add_decorative_elements(text.strip())
+    def format_code_block(self, match):
+        language = match.group(1) or ''
+        code = match.group(2)
+        return f"💻 Code ({language}):\n┌──────────────────\n│ {code.replace('│', '|')}\n└──────────────────"
+
+    def format_header(self, match):
+        level = len(match.group(1))
+        text = match.group(2)
+        decorators = ['🔷', '🔶', '📌', '💠', '🔸', '🔹']
+        return f"\n{decorators[min(level-1, len(decorators)-1)]} {text.upper()}\n"
+
+    def add_decorative_elements(self, text):
+        # Add topic-based icons
+        if "math" in text.lower() or any(char in text for char in "+-×÷="):
+            text = "🧮 Mathematical Solution:\n" + text
+        elif "code" in text.lower() or "programming" in text.lower():
+            text = "👨‍💻 Programming Solution:\n" + text
+        elif "aptitude" in text.lower():
+            text = "🎯 Aptitude Solution:\n" + text
+        else:
+            text = "💡 Answer:\n" + text
+
+        # Add decorative borders for important information
+        text = re.sub(r'(Important:|Note:|Remember:)(.*?)(?=\n\n|$)', 
+                     r'📢 \1\n━━━━━━━━━━━━━━\2\n━━━━━━━━━━━━━━', 
+                     text, flags=re.DOTALL)
+
+        # Format steps
+        text = re.sub(r'Step (\d+):', r'📍 Step \1:', text)
+
+        # Add conclusion formatting
+        if "conclusion" in text.lower():
+            text = re.sub(r'(conclusion:.*?)(?=\n|$)', 
+                         r'🎯 Final \1', 
+                         text, flags=re.IGNORECASE)
+
+        return f"{'═' * 30}\n{text}\n{'═' * 30}"
+
+    async def get_response(self, query):
+        try:
+            # Previous logic remains the same...
+            
+            # Format the response based on type
+            if self.aptitude.detect_type(query):
+                response = self.format_aptitude_response(final_response)
+            elif re.match(r'^[\d+\-*/().\s]+$', query):
+                response = self.format_math_response(final_response)
+            else:
+                response = self.format_general_response(final_response)
+            
+            return response
+
+        except Exception as e:
+            logger.error(f"Error in get_response: {e}")
+            return "❌ I encountered an error. Please try rephrasing your question."
+
+    def format_aptitude_response(self, response):
+        formatted = "🎯 Aptitude Problem Solution\n"
+        formatted += "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        
+        # Format steps
+        steps = response.split('\n')
+        for i, step in enumerate(steps, 1):
+            if step.strip():
+                formatted += f"📍 Step {i}: {step}\n"
+        
+        formatted += "\n✨ Final Answer: " + steps[-1]
+        return formatted
+
+    def format_math_response(self, response):
+        return f"""
+🧮 Mathematical Calculation
+━━━━━━━━━━━━━━━━━━━━
+📊 Expression: {response.split('Result:')[0]}
+📝 Result: {response.split('Result:')[1]}
+━━━━━━━━━━━━━━━━━━━━"""
+
+    def format_general_response(self, response):
+        # Add section breaks and icons
+        sections = response.split('\n\n')
+        formatted = ""
+        
+        for i, section in enumerate(sections):
+            if i == 0:
+                formatted += f"💡 {section}\n\n"
+            else:
+                formatted += f"📌 {section}\n\n"
+        
+        return formatted
 
 bot = AIBot()
 
