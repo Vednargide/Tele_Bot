@@ -245,6 +245,10 @@ I can help with:
 Just type your question!
 """
     await update.message.reply_text(help_text)
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the /stop command to stop the bot."""
+    await update.message.reply_text("🛑 Bot is stopping. Goodbye!")
+    exit(0)  # Terminates the script immediately
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -273,6 +277,7 @@ def main():
     
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("stop", stop))
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
         handle_message
