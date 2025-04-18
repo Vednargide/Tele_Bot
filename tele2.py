@@ -247,8 +247,8 @@ Just type your question!
     await update.message.reply_text(help_text)
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the /stop command to stop the bot."""
-    await update.message.reply_text("🛑 Bot is stopping. Goodbye!")
-    exit(0)  # Terminates the script immediately
+    await update.message.reply_text("🛑 Saale Kamine So jaa... Goodbye!")
+    await context.application.stop()  # Terminates the script immediately
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
