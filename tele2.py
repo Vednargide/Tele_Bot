@@ -334,6 +334,24 @@ Please provide:
             logger.error(f"Image query error: {str(e)}")
             return "❌ Error processing image query"
 
+    async def get_gemini_response(self, prompt):
+        try:
+            global gemini_model
+            if not gemini_model:
+                logger.error("Gemini model not initialized")
+                return "Error: AI model not initialized properly."
+                
+            response = gemini_model.generate_content(prompt)
+            if response and hasattr(response, 'text'):
+                return response.text
+            elif response and hasattr(response, 'parts'):
+                return ' '.join(part.text for part in response.parts)
+            else:
+                return "I couldn't process this request properly."
+        except Exception as e:
+            logger.error(f"Gemini API error: {str(e)}")
+            return "I encountered an error processing your request."
+
     async def get_enhanced_response(self, query):
         try:
             # Check cache first
@@ -395,7 +413,7 @@ Requirements:
             logger.error(f"Enhanced response error: {str(e)}")
             return await self.get_gemini_response(query)
 
-    # Fix the clean_response method (remove duplicate)
+    # Keep only one clean_response method
     def clean_response(self, text):
         try:
             if not text:
@@ -428,21 +446,8 @@ Requirements:
         except Exception as e:
             logger.error(f"Error in get_response: {str(e)}")
             return "❌ I encountered an error. Please try rephrasing your question."
-        
 
-    
-        try:
-        # Remove any problematic characters
-            text = str(text).replace('_', '\\_').replace('*', '\\*').replace('`', '\\`')
-        # Remove excessive newlines
-            text = re.sub(r'\n{3,}', '\n\n', text)
-        # Add emoji prefix
-            return "💡 " + text.strip()
-        except Exception as e:
-            logger.error(f"Error in clean_response: {str(e)}")
-            return "❌ Error formatting response"
-        
-
+# Create bot instance
 bot = AIBot()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -529,6 +534,9 @@ def main():
     
     # Configure APIs
     genai.configure(api_key=GEMINI_API_KEY)
+    
+    # Initialize global models
+    global gemini_model, hf_client
     gemini_model = genai.GenerativeModel('gemini-1.5-pro-latest')
     hf_client = InferenceClient(token=HUGGINGFACE_API_KEY)
     
