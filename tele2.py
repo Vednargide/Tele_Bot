@@ -7,6 +7,9 @@ from huggingface_hub import InferenceClient
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from dotenv import load_dotenv
+from transformers import pipeline
+from sentence_transformers import SentenceTransformer, util
+import torch
 
 load_dotenv()
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -180,25 +183,78 @@ class AIBot:
         
             return "💡 " + text.strip()
 
+    async def get_enhanced_response(self, query):
+        try:
+            responses = []
+            
+            # Get Gemini response
+            gemini_response = await self.get_gemini_response(query)
+            if gemini_response:
+                responses.append(("Gemini", gemini_response, 0.9))
+
+            # Get specialized responses based on query type
+            query_type = self.classify_query(query)
+            
+            if query_type == "question":
+                qa_response = self.qa_model(question=query, context=query)
+                responses.append(("QA", qa_response['answer'], qa_response['score']))
+            
+            # Calculate response quality scores
+            best_response = self.select_best_response(query, responses)
+            
+            if best_response:
+                return f"🎯 [{best_response[0]}] {best_response[1]}"
+            
+            return await self.get_gemini_response(query)  # Fallback to Gemini
+
+        except Exception as e:
+            logger.error(f"Enhanced response error: {str(e)}")
+            return await self.get_gemini_response(query)
+
+    def classify_query(self, query):
+        result = self.classifier(query, candidate_labels=["question", "statement", "command"])
+        return result[0]['label']
+
+    def select_best_response(self, query, responses):
+        if not responses:
+            return None
+
+        best_score = 0
+        best_response = None
+
+        query_embedding = self.text_model.encode(query, convert_to_tensor=True)
+
+        for source, response, conf in responses:
+            if conf < self.confidence_threshold:
+                continue
+
+            response_embedding = self.text_model.encode(response, convert_to_tensor=True)
+            similarity = util.pytorch_cos_sim(query_embedding, response_embedding)
+            
+            score = float(similarity[0][0]) * conf
+            
+            if score > best_score:
+                best_score = score
+                best_response = (source, response)
+
+        return best_response
+
     async def get_response(self, query):
         try:
-        # Check for simple math
+            # Check for math first
             if re.match(r'^[\d+\-*/().\s]+$', query):
                 result = self.math.solve(query)
                 if result is not None:
                     return f"🔢 Result: {result}"
 
-        # Get Gemini response with error handling
-            response = await self.get_gemini_response(query)
-            if not response:
-                return "❌ I couldn't generate a response. Please try again."
-            
+            # Get enhanced response
+            response = await self.get_enhanced_response(query)
             return self.clean_response(response)
 
         except Exception as e:
             logger.error(f"Error in get_response: {str(e)}")
             return "❌ I encountered an error. Please try rephrasing your question."
-
+        
 
     
         try:
@@ -248,7 +304,7 @@ Just type your question!
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the /stop command to stop the bot."""
     await update.message.reply_text("🛑 Saale Kamine So jaa... Goodbye!")
-    await context.application.stop()  # Terminates the script immediately
+    await context.application.stop()
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
