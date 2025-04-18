@@ -197,6 +197,7 @@ class ImageProcessor:
 
 class AIBot:
     def __init__(self):
+        self.logger = logging.getLogger(__name__)
         self.aptitude = AptitudeHandler()
         self.math = MathHandler()
         self.pattern_recognition = PatternRecognitionHandler()
@@ -410,26 +411,8 @@ Requirements:
             return result
 
         except Exception as e:
-            logger.error(f"Enhanced response error: {str(e)}")
+            self.logger.error(f"Enhanced response error: {str(e)}")
             return await self.get_gemini_response(query)
-
-    # Keep only one clean_response method
-    def clean_response(self, text):
-        try:
-            if not text:
-                return "❌ I couldn't generate a response."
-            
-            text = str(text).replace('_', '\\_').replace('*', '\\*').replace('`', '\\`')
-            text = re.sub(r'\n{3,}', '\n\n', text)
-            
-            return "💡 " + text.strip()
-        except Exception as e:
-            logger.error(f"Error in clean_response: {str(e)}")
-            return "❌ Error formatting response"
-
-    def classify_query(self, query):
-        result = self.classifier(query, candidate_labels=["question", "statement", "command"])
-        return result[0]['label']
 
     async def get_response(self, query):
         try:
@@ -444,7 +427,7 @@ Requirements:
             return self.clean_response(response)
 
         except Exception as e:
-            logger.error(f"Error in get_response: {str(e)}")
+            self.logger.error(f"Error in get_response: {str(e)}")
             return "❌ I encountered an error. Please try rephrasing your question."
 
 # Create bot instance
@@ -518,10 +501,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     # Configure logging
+    # At the top of the file, after imports
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-    # Add this import
-    import os
-    os.environ['TOKENIZERS_PARALLELISM'] = 'false'  # Reduces warnings
     logger = logging.getLogger(__name__)
     
     # Load environment variables
