@@ -203,19 +203,51 @@ class AIBot:
         self.allowed_group_ids = [-1001369278049]
         self.image_processor = ImageProcessor()
         
-        # Initialize specialized models
-        self.qa_model = pipeline('question-answering', model='deepset/roberta-base-squad2')
-        self.text_model = SentenceTransformer('all-MiniLM-L6-v2')
-        self.classifier = pipeline('text-classification', model='facebook/bart-large-mnli')
+        # Optimize models for CPU
+        self.qa_model = pipeline('question-answering', 
+                               model='deepset/roberta-base-squad2',
+                               device=-1)  # Force CPU
+        self.text_model = SentenceTransformer('all-MiniLM-L6-v2',
+                                             device='cpu')  # Force CPU
+        self.classifier = pipeline('text-classification', 
+                                 model='facebook/bart-large-mnli',
+                                 device=-1)  # Force CPU
         
-        # Enhanced configuration
+        # Reduce model complexity
         self.gemini_config = {
-            'temperature': 0.2,  # Lower temperature for more focused responses
-            'top_p': 0.95,
-            'top_k': 40,
-            'max_output_tokens': 4096,
+            'temperature': 0.2,
+            'top_p': 0.85,  # Reduced from 0.95
+            'top_k': 20,    # Reduced from 40
+            'max_output_tokens': 2048  # Reduced from 4096
         }
-        self.confidence_threshold = 0.85
+        self.confidence_threshold = 0.80  # Slightly reduced threshold
+
+    async def select_best_response(self, query, responses):
+        if not responses:
+            return None
+
+        best_score = 0
+        best_response = None
+
+        # Convert to CPU tensor explicitly
+        query_embedding = self.text_model.encode(query, convert_to_tensor=True).cpu()
+
+        for source, response, conf in responses:
+            if conf < self.confidence_threshold:
+                continue
+
+            # Process in smaller batches for CPU
+            response_embedding = self.text_model.encode(response, convert_to_tensor=True).cpu()
+            with torch.no_grad():  # Disable gradient computation
+                similarity = util.pytorch_cos_sim(query_embedding, response_embedding)
+            
+            score = float(similarity[0][0]) * conf
+            
+            if score > best_score:
+                best_score = score
+                best_response = (source, response)
+
+        return best_response
 
     async def process_image_query(self, image_bytes):
         try:
@@ -314,30 +346,6 @@ Requirements:
     def classify_query(self, query):
         result = self.classifier(query, candidate_labels=["question", "statement", "command"])
         return result[0]['label']
-
-    def select_best_response(self, query, responses):
-        if not responses:
-            return None
-
-        best_score = 0
-        best_response = None
-
-        query_embedding = self.text_model.encode(query, convert_to_tensor=True)
-
-        for source, response, conf in responses:
-            if conf < self.confidence_threshold:
-                continue
-
-            response_embedding = self.text_model.encode(response, convert_to_tensor=True)
-            similarity = util.pytorch_cos_sim(query_embedding, response_embedding)
-            
-            score = float(similarity[0][0]) * conf
-            
-            if score > best_score:
-                best_score = score
-                best_response = (source, response)
-
-        return best_response
 
     async def get_response(self, query):
         try:
