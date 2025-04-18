@@ -203,51 +203,83 @@ class AIBot:
         self.allowed_group_ids = [-1001369278049]
         self.image_processor = ImageProcessor()
         
-        # Optimize models for CPU
-        self.qa_model = pipeline('question-answering', 
-                               model='deepset/roberta-base-squad2',
-                               device=-1)  # Force CPU
-        self.text_model = SentenceTransformer('all-MiniLM-L6-v2',
-                                             device='cpu')  # Force CPU
-        self.classifier = pipeline('text-classification', 
-                                 model='facebook/bart-large-mnli',
-                                 device=-1)  # Force CPU
+        # Lazy loading of models
+        self._qa_model = None
+        self._text_model = None
+        self._classifier = None
         
         # Reduce model complexity
         self.gemini_config = {
             'temperature': 0.2,
-            'top_p': 0.85,  # Reduced from 0.95
-            'top_k': 20,    # Reduced from 40
-            'max_output_tokens': 2048  # Reduced from 4096
+            'top_p': 0.85,
+            'top_k': 20,
+            'max_output_tokens': 1024  # Further reduced
         }
-        self.confidence_threshold = 0.80  # Slightly reduced threshold
+        self.confidence_threshold = 0.80
+
+    @property
+    def qa_model(self):
+        if self._qa_model is None:
+            self._qa_model = pipeline('question-answering', 
+                                    model='deepset/roberta-base-squad2',
+                                    device=-1,
+                                    model_kwargs={'low_cpu_mem_usage': True})
+        return self._qa_model
+
+    @property
+    def text_model(self):
+        if self._text_model is None:
+            self._text_model = SentenceTransformer('all-MiniLM-L6-v2',
+                                                  device='cpu')
+        return self._text_model
+
+    @property
+    def classifier(self):
+        if self._classifier is None:
+            self._classifier = pipeline('text-classification', 
+                                      model='facebook/bart-large-mnli',
+                                      device=-1,
+                                      model_kwargs={'low_cpu_mem_usage': True})
+        return self._classifier
 
     async def select_best_response(self, query, responses):
         if not responses:
             return None
 
-        best_score = 0
-        best_response = None
+        try:
+            # Process in smaller chunks
+            chunk_size = 512  # Reduced chunk size for CPU
+            query_embedding = self.text_model.encode(query[:chunk_size], 
+                                                   convert_to_tensor=True,
+                                                   show_progress_bar=False).cpu()
 
-        # Convert to CPU tensor explicitly
-        query_embedding = self.text_model.encode(query, convert_to_tensor=True).cpu()
+            best_score = 0
+            best_response = None
 
-        for source, response, conf in responses:
-            if conf < self.confidence_threshold:
-                continue
+            for source, response, conf in responses:
+                if conf < self.confidence_threshold:
+                    continue
 
-            # Process in smaller batches for CPU
-            response_embedding = self.text_model.encode(response, convert_to_tensor=True).cpu()
-            with torch.no_grad():  # Disable gradient computation
-                similarity = util.pytorch_cos_sim(query_embedding, response_embedding)
-            
-            score = float(similarity[0][0]) * conf
-            
-            if score > best_score:
-                best_score = score
-                best_response = (source, response)
+                # Process response in chunks if too long
+                response_text = response[:chunk_size]
+                with torch.no_grad():
+                    response_embedding = self.text_model.encode(response_text, 
+                                                              convert_to_tensor=True,
+                                                              show_progress_bar=False).cpu()
+                    similarity = util.pytorch_cos_sim(query_embedding, response_embedding)
+                
+                score = float(similarity[0][0]) * conf
+                
+                if score > best_score:
+                    best_score = score
+                    best_response = (source, response)
 
-        return best_response
+            return best_response
+
+        except Exception as e:
+            logger.error(f"Error in select_best_response: {str(e)}")
+            # Fallback to first response if similarity calculation fails
+            return responses[0] if responses else None
 
     async def process_image_query(self, image_bytes):
         try:
