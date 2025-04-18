@@ -11,7 +11,7 @@ from transformers import pipeline
 from sentence_transformers import SentenceTransformer, util
 import torch
 from PIL import Image
-import pytesseract
+import easyocr
 import cv2
 import numpy as np
 import io
@@ -317,6 +317,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
+    
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("stop", stop))
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
+        handle_message
+    ))
+    
+    print("🤖 Bot is starting...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == '__main__':
+    # At the beginning of the file, make sure load_dotenv() is called
+    load_dotenv()
+    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    
+    # Add these lines to properly get environment variables
+    TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
+    
+    # Configure the APIs
+    genai.configure(api_key=GEMINI_API_KEY)
+    gemini_model = genai.GenerativeModel('gemini-1.5-pro-latest')
+    hf_client = InferenceClient(token=HUGGINGFACE_API_KEY)
     
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
