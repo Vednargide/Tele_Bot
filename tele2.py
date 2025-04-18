@@ -7,19 +7,19 @@ from huggingface_hub import InferenceClient
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from dotenv import load_dotenv
-from transformers import pipeline
-from sentence_transformers import SentenceTransformer, util
-import torch
-from PIL import Image
-import easyocr
-import cv2
-import numpy as np
-import io
-# Remove these imports
-# from google.cloud import vision
-# import pytesseract
 
-# Add these class definitions before the ImageProcessor class
+load_dotenv()
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GEMINI_API_KEY = los.getenv("GEMINI_API_KEY")
+HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
+
+genai.configure(api_key=GEMINI_API_KEY)
+gemini_model = genai.GenerativeModel('gemini-1.5-pro-latest')
+hf_client = InferenceClient(token=HUGGINGFACE_API_KEY)
+
 class PatternRecognitionHandler:
     def __init__(self):
         self.transformation_types = {
@@ -141,207 +141,26 @@ class AptitudeHandler:
                 return qtype
         return None
 
-class ImageProcessor:
-    def __init__(self):
-        self.reader = easyocr.Reader(['en'])  # EasyOCR is free
-        
-    async def process_image(self, image_bytes):
-        try:
-            # Convert bytes to image
-            image = Image.open(io.BytesIO(image_bytes))
-            
-            # Convert to CV2 format
-            cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-            
-            # Image enhancement for blurry images
-            enhanced = self.enhance_image(cv_image)
-            
-            # Use EasyOCR (free and reliable)
-            easy_result = self.reader.readtext(enhanced)
-            if easy_result:
-                text = ' '.join([t[1] for t in easy_result])
-                return self.clean_text(text)
-            
-            return "Could not extract text from image"
-            
-        except Exception as e:
-            logger.error(f"Image processing error: {str(e)}")
-            return None
-
-    def enhance_image(self, image):
-        try:
-            # Convert to grayscale
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            
-            # Denoise
-            denoised = cv2.fastNlMeansDenoising(gray)
-            
-            # Enhance contrast
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-            enhanced = clahe.apply(denoised)
-            
-            # Sharpen
-            kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
-            sharpened = cv2.filter2D(enhanced, -1, kernel)
-            
-            return sharpened
-        except Exception as e:
-            logger.error(f"Image enhancement error: {str(e)}")
-            return image
-
-    def clean_text(self, text):
-        # Remove special characters and extra whitespace
-        cleaned = re.sub(r'[^\w\s\n.?!]', '', text)
-        cleaned = re.sub(r'\s+', ' ', cleaned)
-        return cleaned.strip()
-
 class AIBot:
     def __init__(self):
-        self.logger = logging.getLogger(__name__)
         self.aptitude = AptitudeHandler()
         self.math = MathHandler()
         self.pattern_recognition = PatternRecognitionHandler()
         self.allowed_group_ids = [-1001369278049]
-        
-        # Lazy loading for image processor
-        self._image_processor = None
-        
-        # Lazy loading for models
-        self._qa_model = None
-        self._text_model = None
-        self._classifier = None
-        
-        # Reduce model complexity for CPU
         self.gemini_config = {
-            'temperature': 0.2,
-            'top_p': 0.85,
-            'top_k': 20,
-            'max_output_tokens': 1024  # Reduced for CPU
+            'temperature': 0.3,
+            'top_p': 0.95,
+            'top_k': 40,
+            'max_output_tokens': 4096,
         }
-        self.confidence_threshold = 0.80
-        
-        # Add memory management
-        self.cache = {}
-        self.max_cache_size = 50
-
-    @property
-    def image_processor(self):
-        if self._image_processor is None:
-            self._image_processor = ImageProcessor()
-        return self._image_processor
-
-    @property
-    def qa_model(self):
-        if self._qa_model is None:
-            self._qa_model = pipeline('question-answering', 
-                                    model='deepset/roberta-base-squad2',
-                                    device=-1,  # Force CPU
-                                    model_kwargs={'low_cpu_mem_usage': True})
-        return self._qa_model
-
-    @property
-    def text_model(self):
-        if self._text_model is None:
-            self._text_model = SentenceTransformer('all-MiniLM-L6-v2',
-                                                 device='cpu')
-        return self._text_model
-
-    @property
-    def classifier(self):
-        if self._classifier is None:
-            self._classifier = pipeline('text-classification', 
-                                      model='facebook/bart-large-mnli',
-                                      device=-1,  # Force CPU
-                                      model_kwargs={'low_cpu_mem_usage': True})
-        return self._classifier
 
     async def should_respond(self, chat_id, message_text):
-        # Add this missing method
-        return True  # Always respond for now
-
-    async def select_best_response(self, query, responses):
-        if not responses:
-            return None
-
-        try:
-            # Limit query length for memory efficiency
-            query = query[:512]
-            
-            # Check cache first
-            cache_key = f"query_{hash(query)}"
-            if cache_key in self.cache:
-                return self.cache[cache_key]
-                
-            best_score = 0
-            best_response = None
-
-            # Process with memory optimization
-            with torch.no_grad():  # Disable gradient computation
-                query_embedding = self.text_model.encode(query, 
-                                                       convert_to_tensor=True,
-                                                       show_progress_bar=False).cpu()
-
-                for source, response, conf in responses:
-                    if conf < self.confidence_threshold:
-                        continue
-
-                    # Limit response length for memory efficiency
-                    response_text = response[:512]
-                    response_embedding = self.text_model.encode(response_text, 
-                                                              convert_to_tensor=True,
-                                                              show_progress_bar=False).cpu()
-                    
-                    similarity = util.pytorch_cos_sim(query_embedding, response_embedding)
-                    score = float(similarity[0][0]) * conf
-                    
-                    if score > best_score:
-                        best_score = score
-                        best_response = (source, response)
-
-            # Update cache (with size limit)
-            if len(self.cache) >= self.max_cache_size:
-                # Remove oldest item
-                self.cache.pop(next(iter(self.cache)))
-            self.cache[cache_key] = best_response
-                
-            return best_response
-
-        except Exception as e:
-            logger.error(f"Error in select_best_response: {str(e)}")
-            # Fallback to first response
-            return responses[0] if responses else None
-
-    async def process_image_query(self, image_bytes):
-        try:
-            # Extract text from image
-            extracted_text = await self.image_processor.process_image(image_bytes)
-            if not extracted_text:
-                return "❌ Could not process the image. Please try a clearer image."
-
-            # Create an enhanced prompt
-            prompt = f"""Analyze this text and provide a detailed, accurate answer:
-Text from image: {extracted_text}
-
-Please provide:
-1. A comprehensive answer
-2. Step-by-step explanation if it's a problem
-3. Key concepts involved
-4. Additional relevant information"""
-
-            response = await self.get_enhanced_response(prompt)
-            return f"📝 Analysis:\n{response}"
-
-        except Exception as e:
-            logger.error(f"Image query error: {str(e)}")
-            return "❌ Error processing image query"
+        if not message_text or message_text.startswith('/'):
+            return False
+        return chat_id in self.allowed_group_ids
 
     async def get_gemini_response(self, prompt):
         try:
-            global gemini_model
-            if not gemini_model:
-                logger.error("Gemini model not initialized")
-                return "Error: AI model not initialized properly."
-                
             response = gemini_model.generate_content(prompt)
             if response and hasattr(response, 'text'):
                 return response.text
@@ -352,85 +171,48 @@ Please provide:
         except Exception as e:
             logger.error(f"Gemini API error: {str(e)}")
             return "I encountered an error processing your request."
-
-    async def get_enhanced_response(self, query):
-        try:
-            # Check cache first
-            cache_key = f"enhanced_{hash(query)}"
-            if cache_key in self.cache:
-                return self.cache[cache_key]
-                
-            responses = []
-            
-            # Get Gemini response with enhanced prompt
-            enhanced_prompt = f"""Please provide a detailed and accurate answer to this query:
-{query}
-
-Requirements:
-- Be comprehensive and precise
-- Include relevant examples if applicable
-- Explain any technical terms
-- Verify calculations if present
-- Cite sources if needed"""
-
-            gemini_response = await self.get_gemini_response(enhanced_prompt)
-            if gemini_response:
-                responses.append(("Gemini", gemini_response, 0.9))
-
-            # Only use specialized models for shorter queries (CPU optimization)
-            if len(query) < 500:
-                # Get specialized responses based on query type
-                query_type = self.classify_query(query)
-                
-                if query_type == "question":
-                    qa_response = self.qa_model(question=query, context=query)
-                    responses.append(("QA", qa_response['answer'], qa_response['score']))
-                
-                # Handle mathematical expressions
-                if re.search(r'\d+[\+\-\*\/\(\)]+\d+', query):
-                    math_result = self.math.solve(query)
-                    if math_result is not None:
-                        responses.append(("Math", f"The calculation result is: {math_result}", 1.0))
-
-                # Handle pattern recognition
-                if re.search(r'[A-Z]+\s*:\s*[A-Z]+', query):
-                    pattern_result = self.pattern_recognition.analyze_pattern(query)
-                    if pattern_result:
-                        responses.append(("Pattern", pattern_result, 0.95))
-
-            # Get best response
-            best_response = await self.select_best_response(query, responses)
-            result = f"🎯 {best_response[1]}" if best_response else await self.get_gemini_response(query)
-            
-            # Update cache (with size limit)
-            if len(self.cache) >= self.max_cache_size:
-                # Remove oldest item
-                self.cache.pop(next(iter(self.cache)))
-            self.cache[cache_key] = result
-            
-            return result
-
-        except Exception as e:
-            self.logger.error(f"Enhanced response error: {str(e)}")
-            return await self.get_gemini_response(query)
+    def clean_response(self, text):
+            if not text:
+                return "❌ I couldn't generate a response."
+        
+            text = text.replace('_', '\\_').replace('*', '\\*').replace('`', '\\`')
+            text = re.sub(r'\n{3,}', '\n\n', text)
+        
+            return "💡 " + text.strip()
 
     async def get_response(self, query):
         try:
-            # Check for math first
+        # Check for simple math
             if re.match(r'^[\d+\-*/().\s]+$', query):
                 result = self.math.solve(query)
                 if result is not None:
                     return f"🔢 Result: {result}"
 
-            # Get enhanced response
-            response = await self.get_enhanced_response(query)
+        # Get Gemini response with error handling
+            response = await self.get_gemini_response(query)
+            if not response:
+                return "❌ I couldn't generate a response. Please try again."
+            
             return self.clean_response(response)
 
         except Exception as e:
-            self.logger.error(f"Error in get_response: {str(e)}")
+            logger.error(f"Error in get_response: {str(e)}")
             return "❌ I encountered an error. Please try rephrasing your question."
 
-# Create bot instance
+
+    
+        try:
+        # Remove any problematic characters
+            text = str(text).replace('_', '\\_').replace('*', '\\*').replace('`', '\\`')
+        # Remove excessive newlines
+            text = re.sub(r'\n{3,}', '\n\n', text)
+        # Add emoji prefix
+            return "💡 " + text.strip()
+        except Exception as e:
+            logger.error(f"Error in clean_response: {str(e)}")
+            return "❌ Error formatting response"
+        
+
 bot = AIBot()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -466,27 +248,18 @@ Just type your question!
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the /stop command to stop the bot."""
     await update.message.reply_text("🛑 Saale Kamine So jaa... Goodbye!")
-    await context.application.stop()
+    await context.application.stop()  # Terminates the script immediately
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         chat_id = update.effective_chat.id
-        
-        # Handle image messages
-        if update.message.photo:
-            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-            # Get the highest quality photo
-            photo = update.message.photo[-1]
-            # Download the photo
-            photo_file = await context.bot.get_file(photo.file_id)
-            photo_bytes = await photo_file.download_as_bytearray()
-            
-            response = await bot.process_image_query(photo_bytes)
-        else:
-            message_text = update.message.text
-            if not await bot.should_respond(chat_id, message_text):
-                return
-            response = await bot.get_response(message_text)
+        message_text = update.message.text
+
+        if not await bot.should_respond(chat_id, message_text):
+            return
+
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        response = await bot.get_response(message_text)
         
         if len(response) <= 4096:
             await update.message.reply_text(response)
@@ -500,40 +273,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Sorry, I encountered an error. Please try again.")
 
 def main():
-    # Configure logging
-    # At the top of the file, after imports
-    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-    logger = logging.getLogger(__name__)
-    
-    # Load environment variables
-    load_dotenv()
-    
-    # Get API keys
-    TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-    HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
-    
-    # Configure APIs
-    genai.configure(api_key=GEMINI_API_KEY)
-    
-    # Initialize global models
-    global gemini_model, hf_client
-    gemini_model = genai.GenerativeModel('gemini-1.5-pro-latest')
-    hf_client = InferenceClient(token=HUGGINGFACE_API_KEY)
-    
-    # Initialize application
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     
-    # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("stop", stop))
     application.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND,
-        handle_message
-    ))
-    application.add_handler(MessageHandler(
-        filters.PHOTO,
+        filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
         handle_message
     ))
     
