@@ -192,9 +192,10 @@ class AIBot:
     def _is_programming_question(self, text):
         keywords = [
             'program', 'code', 'function', 'algorithm',
-            'write a', 'implement', 'create a program', 'Constraints:', 'Input:'
+            'write a', 'implement', 'create a program', 'Constraints:',
+            'Input:', 'Output:', 'Example', 'return'  # Add these keywords
         ]
-        return any(keyword in text.lower() for keyword in keywords)
+        return any(keyword.lower() in text.lower() for keyword in keywords)
 
     async def get_response(self, query, chat_id=None):
         try:
