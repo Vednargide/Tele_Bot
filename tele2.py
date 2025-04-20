@@ -192,7 +192,7 @@ class AIBot:
     def _is_programming_question(self, text):
         keywords = [
             'program', 'code', 'function', 'algorithm',
-            'write a', 'implement', 'create a program'
+            'write a', 'implement', 'create a program','Constraints:'
         ]
         return any(keyword in text.lower() for keyword in keywords)
 
