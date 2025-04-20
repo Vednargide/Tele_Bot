@@ -8,6 +8,14 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application, 
+    CommandHandler, 
+    MessageHandler, 
+    CallbackQueryHandler,  # Add this import
+    filters, 
+    ContextTypes
+)
 
 load_dotenv()
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -148,6 +156,7 @@ class AIBot:
         self.math = MathHandler()
         self.pattern_recognition = PatternRecognitionHandler()
         self.allowed_group_ids = [-1001369278049]
+        self.programming_questions = {}  # Add this line
         self.gemini_config = {
             'temperature': 0.3,
             'top_p': 0.95,
