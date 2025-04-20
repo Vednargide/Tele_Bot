@@ -7,6 +7,7 @@ from huggingface_hub import InferenceClient
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from dotenv import load_dotenv
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 load_dotenv()
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -179,8 +180,30 @@ class AIBot:
         
             return "💡 " + text.strip()
 
-    async def get_response(self, query):
+    def _is_programming_question(self, text):
+        keywords = [
+            'program', 'code', 'function', 'algorithm',
+            'write a', 'implement', 'create a program'
+        ]
+        return any(keyword in text.lower() for keyword in keywords)
+
+    async def get_response(self, query, chat_id=None):
         try:
+            # Check if it's a programming question
+            if chat_id and self._is_programming_question(query):
+                # Store the question
+                self.programming_questions[chat_id] = query
+                # Create language selection buttons
+                keyboard = [[
+                    InlineKeyboardButton("🐍 Python", callback_data="lang_python"),
+                    InlineKeyboardButton("☕ Java", callback_data="lang_java"),
+                ], [
+                    InlineKeyboardButton("⚡ C++", callback_data="lang_cpp"),
+                    InlineKeyboardButton("💛 JavaScript", callback_data="lang_javascript")
+                ]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                return ("Please select the programming language:", reply_markup)
+
         # Check for simple math
             if re.match(r'^[\d+\-*/().\s]+$', query):
                 result = self.math.solve(query)
@@ -249,6 +272,39 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🛑 Saale Kamine So jaa... Goodbye!")
     await context.application.stop()  # Terminates the script immediately
 
+# Add new callback handler
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        query = update.callback_query
+        await query.answer()
+        
+        if query.data.startswith("lang_"):
+            language = query.data.split("_")[1]
+            chat_id = query.message.chat_id
+            
+            if chat_id in bot.programming_questions:
+                question = bot.programming_questions[chat_id]
+                prompt = f"""Write a solution in {language} for the following problem:
+                
+{question}
+
+Provide:
+1. Problem analysis
+2. Solution approach
+3. Complete code with comments
+4. Example usage
+"""
+                response = await bot.get_gemini_response(prompt)
+                await query.edit_message_text(text=bot.clean_response(response))
+                del bot.programming_questions[chat_id]  # Clean up
+            else:
+                await query.edit_message_text(text="❌ Question not found. Please ask again.")
+                
+    except Exception as e:
+        logger.error(f"Error in button callback: {e}")
+        await query.edit_message_text(text="❌ Error processing selection. Please try again.")
+
+# Modify handle_message function
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         chat_id = update.effective_chat.id
@@ -258,25 +314,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-        response = await bot.get_response(message_text)
+        response = await bot.get_response(message_text, chat_id)
         
-        if len(response) <= 4096:
-            await update.message.reply_text(response)
+        # Check if response is a tuple (for programming questions)
+        if isinstance(response, tuple):
+            message_text, reply_markup = response
+            await update.message.reply_text(message_text, reply_markup=reply_markup)
         else:
-            chunks = [response[i:i+4000] for i in range(0, len(response), 4000)]
-            for chunk in chunks:
-                await update.message.reply_text(chunk)
+            if len(response) <= 4096:
+                await update.message.reply_text(response)
+            else:
+                chunks = [response[i:i+4000] for i in range(0, len(response), 4000)]
+                for chunk in chunks:
+                    await update.message.reply_text(chunk)
                 
     except Exception as e:
         logger.error(f"Error in handle_message: {e}")
         await update.message.reply_text("❌ Sorry, I encountered an error. Please try again.")
 
+# Update main() function
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("stop", stop))
+    application.add_handler(CallbackQueryHandler(button_callback))  # Add this line
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
         handle_message
