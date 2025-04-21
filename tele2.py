@@ -367,6 +367,43 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error in handle_message: {e}")
         await update.message.reply_text("❌ Sorry, I encountered an error. Please try again.")
 
+# Add this function before the main() function
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        chat_id = update.effective_chat.id
+        
+        # Check if bot should respond
+        if not await bot.should_respond(chat_id, "image"):
+            return
+        
+        # Get the photo with highest resolution
+        photo = update.message.photo[-1]
+        
+        # Send typing action
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        
+        # Download the photo
+        photo_file = await context.bot.get_file(photo.file_id)
+        photo_bytes = io.BytesIO()
+        await photo_file.download_to_memory(photo_bytes)
+        photo_bytes.seek(0)
+        
+        # Analyze the image
+        await update.message.reply_text("🔍 Analyzing your image... This may take a moment.")
+        response = await bot.analyze_image(photo_bytes)
+        
+        # Send response (handle long responses)
+        if len(response) <= 4096:
+            await update.message.reply_text(response)
+        else:
+            chunks = [response[i:i+4000] for i in range(0, len(response), 4000)]
+            for chunk in chunks:
+                await update.message.reply_text(chunk)
+                
+    except Exception as e:
+        logger.error(f"Error in handle_photo: {e}")
+        await update.message.reply_text("❌ Sorry, I encountered an error processing your image. Please try again.")
+
 # Update main() function to work with Railway
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -390,18 +427,173 @@ def main():
     # Use webhook for Railway deployment
     PORT = int(os.environ.get('PORT', 8080))
     
-    # Check if running on Railway
-    if os.environ.get('RAILWAY_STATIC_URL'):
-        # Use webhook when on Railway
-        WEBHOOK_URL = os.environ.get('RAILWAY_STATIC_URL')
-        application.run_webhook(
-            listen="0.0.0.0",
-            port=PORT,
-            webhook_url=WEBHOOK_URL
-        )
-    else:
-        # Use polling for local development
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Modify the image processing part of your code
+    class AIBot:
+        def __init__(self):
+            self.aptitude = AptitudeHandler()
+            self.math = MathHandler()
+            self.pattern_recognition = PatternRecognitionHandler()
+            self.allowed_group_ids = [-1001369278049]
+            self.programming_questions = {}
+            self.gemini_config = {
+                'temperature': 0.3,
+                'top_p': 0.95,
+                'top_k': 40,
+                'max_output_tokens': 4096,
+            }
+            self.is_active = True
+            
+        async def should_respond(self, chat_id, message_text):
+            if not message_text or message_text.startswith('/'):
+                return False
+            return chat_id in self.allowed_group_ids and self.is_active  # Modify this line
+    
+        async def get_gemini_response(self, prompt):
+            try:
+                response = gemini_model.generate_content(prompt)
+                if response and hasattr(response, 'text'):
+                    return response.text
+                elif response and hasattr(response, 'parts'):
+                    return ' '.join(part.text for part in response.parts)
+                else:
+                    return "I couldn't process this request properly."
+            except Exception as e:
+                logger.error(f"Gemini API error: {str(e)}")
+                return "I encountered an error processing your request."
+        def clean_response(self, text):
+                if not text:
+                    return "❌ I couldn't generate a response."
+            
+            
+                return "💡 " + text.strip()
+    
+        def _is_programming_question(self, text):
+            keywords = [
+                'program', 'code', 'function', 'algorithm',
+                'write a', 'implement', 'create a program', 'Constraints:',
+                'Input:', 'Output:', 'Example', 'return'  # Add these keywords
+            ]
+            return any(keyword.lower() in text.lower() for keyword in keywords)
+    
+        async def get_response(self, query, chat_id=None):
+            try:
+                # Check if it's a programming question
+                if chat_id and self._is_programming_question(query):
+                    # Store the question
+                    self.programming_questions[chat_id] = query
+                    # Create language selection buttons
+                    keyboard = [[
+                        InlineKeyboardButton("🐍 Python", callback_data="lang_python"),
+                        InlineKeyboardButton("☕ Java", callback_data="lang_java"),
+                    ], [
+                        InlineKeyboardButton("⚡ C++", callback_data="lang_cpp"),
+                        InlineKeyboardButton("💛 JavaScript", callback_data="lang_javascript")
+                    ]]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    return ("Please select the programming language:", reply_markup)
+    
+            # Check for simple math
+                if re.match(r'^[\d+\-*/().\s]+$', query):
+                    result = self.math.solve(query)
+                    if result is not None:
+                        return f"🔢 Result: {result}"
+    
+            # Get Gemini response with error handling
+                response = await self.get_gemini_response(query)
+                if not response:
+                    return "❌ I couldn't generate a response. Please try again."
+                
+                return self.clean_response(response)
+    
+            except Exception as e:
+                logger.error(f"Error in get_response: {str(e)}")
+                return "❌ I encountered an error. Please try rephrasing your question."
+    
+    
+        try:
+        # Remove any problematic characters
+            text = str(text).replace('_', '\\_').replace('*', '\\*').replace('`', '\\`')
+        # Remove excessive newlines
+            text = re.sub(r'\n{3,}', '\n\n', text)
+        # Add emoji prefix
+            return "💡 " + text.strip()
+        except Exception as e:
+            logger.error(f"Error in clean_response: {str(e)}")
+            return "❌ Error formatting response"
+        
 
-if __name__ == '__main__':
-    main()
+    async def extract_text_from_image(self, image_file):
+        """Extract text from image using Gemini vision"""
+        try:
+            # Check if running on Railway
+            is_railway = os.environ.get('RAILWAY_STATIC_URL') is not None
+            
+            extracted_text = ""
+            
+            # Only use Tesseract if not on Railway
+            if not is_railway:
+                try:
+                    image = Image.open(image_file)
+                    pytesseract_text = pytesseract.image_to_string(image)
+                    extracted_text = pytesseract_text
+                    image_file.seek(0)  # Reset file pointer
+                except Exception as e:
+                    logger.error(f"Tesseract error: {e}")
+            
+            # Use Gemini Vision capabilities (works on both local and Railway)
+            image_bytes = image_file.read()
+            
+            # Create image part for Gemini
+            image_parts = [
+                {
+                    "mime_type": "image/jpeg",
+                    "data": image_bytes
+                }
+            ]
+            
+            prompt = "Extract all text from this image, especially any math or programming problems. Format it clearly."
+            
+            response = gemini_model.generate_content([prompt, *image_parts])
+            gemini_text = response.text if hasattr(response, 'text') else ""
+            
+            # Use the better result (usually Gemini will be better)
+            if len(gemini_text) > len(extracted_text):
+                return gemini_text
+            elif extracted_text:
+                return extracted_text
+            else:
+                return "No text could be extracted from the image."
+                
+        except Exception as e:
+            logger.error(f"Error extracting text from image: {e}")
+            return None
+    
+    async def analyze_image(self, image_file):
+        """Analyze image content and provide a solution"""
+        try:
+            # Extract text from image
+            extracted_text = await self.extract_text_from_image(image_file)
+            
+            if not extracted_text or len(extracted_text) < 10:
+                return "❌ I couldn't extract enough text from this image. Please send a clearer image."
+            
+            # Determine if it's a programming question
+            is_programming = self._is_programming_question(extracted_text)
+            
+            # Generate prompt based on content type
+            prompt = f"""I've extracted the following text from an image:
+            
+{extracted_text}
+
+This appears to be {'a programming question' if is_programming else 'a question'}.
+Please analyze it carefully and provide a detailed solution with step-by-step explanation.
+If it's a math problem, show all work. If it's code, provide working code with explanations.
+"""
+            
+            # Get response from Gemini
+            response = await self.get_gemini_response(prompt)
+            return f"📝 Extracted Text:\n\n{extracted_text}\n\n💡 Solution:\n\n{response}"
+            
+        except Exception as e:
+            logger.error(f"Error analyzing image: {e}")
+            return "❌ I encountered an error analyzing this image. Please try again with a clearer image."
