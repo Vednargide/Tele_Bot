@@ -179,8 +179,40 @@ class AIBot:
             return False
         return chat_id in self.allowed_group_ids and self.is_active  # Modify this line
 
+    async def analyze_image(self, image_file):
+        """Analyze image content and provide a solution"""
+        try:
+            # Create image part for Gemini
+            image_bytes = image_file.read()
+            image_parts = [
+                {
+                    "mime_type": "image/jpeg",
+                    "data": image_bytes
+                }
+            ]
+            
+            prompt = """Analyze this image carefully. If it contains:
+            - Text: Extract and read all text
+            - Math problems: Provide step-by-step solutions
+            - Code: Explain the code and suggest improvements
+            - Questions: Provide detailed answers
+            
+            Format your response clearly and provide detailed explanations."""
+            
+            # Get response from Gemini
+            response = await self.get_gemini_response([prompt, *image_parts])
+            if not response:
+                return "❌ I couldn't analyze this image. Please try with a clearer image."
+            
+            return self.clean_response(response)
+            
+        except Exception as e:
+            logger.error(f"Error analyzing image: {e}")
+            return "❌ I encountered an error analyzing this image. Please try again with a clearer image."
+
     async def get_gemini_response(self, prompt):
         try:
+            # Handle both text and multimodal prompts
             response = gemini_model.generate_content(prompt)
             if response and hasattr(response, 'text'):
                 return response.text
