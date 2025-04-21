@@ -150,6 +150,15 @@ class AptitudeHandler:
                 return qtype
         return None
 
+# Add these imports at the top
+import io
+from PIL import Image
+import pytesseract
+
+# After existing imports
+# Configure pytesseract path (for Windows)
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
 class AIBot:
     def __init__(self):
         self.aptitude = AptitudeHandler()
@@ -163,8 +172,8 @@ class AIBot:
             'top_k': 40,
             'max_output_tokens': 4096,
         }
-        self.is_active = True  # Add this line to track bot's active state
-
+        self.is_active = True
+        
     async def should_respond(self, chat_id, message_text):
         if not message_text or message_text.startswith('/'):
             return False
@@ -358,21 +367,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error in handle_message: {e}")
         await update.message.reply_text("❌ Sorry, I encountered an error. Please try again.")
 
-# Update main() function
+# Update main() function to work with Railway
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("stop", stop))
-    application.add_handler(CallbackQueryHandler(button_callback))  # Add this line
+    application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
         handle_message
     ))
+    # Add photo handler
+    application.add_handler(MessageHandler(
+        filters.PHOTO & filters.ChatType.GROUPS,
+        handle_photo
+    ))
     
     print("🤖 Bot is starting...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    
+    # Use webhook for Railway deployment
+    PORT = int(os.environ.get('PORT', 8080))
+    
+    # Check if running on Railway
+    if os.environ.get('RAILWAY_STATIC_URL'):
+        # Use webhook when on Railway
+        WEBHOOK_URL = os.environ.get('RAILWAY_STATIC_URL')
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=PORT,
+            webhook_url=WEBHOOK_URL
+        )
+    else:
+        # Use polling for local development
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
     main()
