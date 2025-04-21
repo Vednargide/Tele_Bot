@@ -156,18 +156,19 @@ class AIBot:
         self.math = MathHandler()
         self.pattern_recognition = PatternRecognitionHandler()
         self.allowed_group_ids = [-1001369278049]
-        self.programming_questions = {}  # Add this line
+        self.programming_questions = {}
         self.gemini_config = {
             'temperature': 0.3,
             'top_p': 0.95,
             'top_k': 40,
             'max_output_tokens': 4096,
         }
+        self.is_active = True  # Add this line to track bot's active state
 
     async def should_respond(self, chat_id, message_text):
         if not message_text or message_text.startswith('/'):
             return False
-        return chat_id in self.allowed_group_ids
+        return chat_id in self.allowed_group_ids and self.is_active  # Modify this line
 
     async def get_gemini_response(self, prompt):
         try:
@@ -278,9 +279,24 @@ Just type your question!
 """
     await update.message.reply_text(help_text)
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the /stop command to stop the bot."""
-    await update.message.reply_text("🛑 Saale Kamine So jaa... Goodbye!")
-    await context.application.stop()  # Terminates the script immediately
+    """Handles the /stop command to temporarily stop the bot."""
+    bot.is_active = False  # Just deactivate the bot
+    await update.message.reply_text("🛑 Bot is now sleeping! Use /start to wake me up.")
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    bot.is_active = True  # Reactivate the bot
+    welcome_text = """
+🌟 Welcome! I can help you with:
+
+📊 Mathematics
+🧮 Aptitude Problems
+🔍 Pattern Recognition
+📝 General Questions
+💡 Technical Queries
+
+Just ask me anything!
+"""
+    await update.message.reply_text(welcome_text)
 
 # Add new callback handler
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
