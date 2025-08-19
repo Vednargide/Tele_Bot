@@ -213,7 +213,9 @@ class AIBot:
     async def get_gemini_response(self, prompt):
         try:
             # Handle both text and multimodal prompts
-            response = gemini_model.generate_content(prompt)
+            response = await asyncio.to_thread(
+            gemini_model.generate_content, prompt
+        )
             if response and hasattr(response, 'text'):
                 return response.text
             elif response and hasattr(response, 'parts'):
